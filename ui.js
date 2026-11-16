@@ -10,6 +10,20 @@
   function load(key) { try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; } }
   function save(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* not saved */ } }
 
+  // Rule settings are remembered too. Anything that is not valid is ignored.
+  var RULE_KEY = 'ludo.rules';
+  function applyRuleSettings(r) {
+    if (!r || typeof r !== 'object') return;
+    ['exactHome', 'extraTurns', 'threeSixes', 'safeSquares'].forEach(function (k) {
+      if (typeof r[k] === 'boolean') L.rules[k] = r[k];
+    });
+    if (Array.isArray(r.exitRolls) && r.exitRolls.length &&
+        r.exitRolls.every(function (n) { return n >= 1 && n <= 6 && n % 1 === 0; })) {
+      L.rules.exitRolls = r.exitRolls.slice().sort();
+    }
+  }
+  applyRuleSettings(load(RULE_KEY));
+
   var agents = KEYS.map(function (k) { return new A.Agent(load('ludo.agent.' + k)); });
   var seats = ['agent', 'agent', 'agent', 'agent'];           // 'agent' or 'human'
   var hist = load('ludo.history');
@@ -102,7 +116,7 @@
     for (i = 0; i < 52; i++) {                                 // shared track
       var owner = L.START.indexOf(i);
       cell(PATH[i], owner >= 0 ? col[owner] : null, 0.85);
-      if (L.isSafe(i) && owner < 0) star((PATH[i][0] + 0.5) * u, (PATH[i][1] + 0.5) * u, 0.3 * u, fg);
+      if (L.isSafe(i, game.rules) && owner < 0) star((PATH[i][0] + 0.5) * u, (PATH[i][1] + 0.5) * u, 0.3 * u, fg);
     }
     for (p = 0; p < 4; p++) for (i = 0; i < 5; i++) cell(columnCell(p, i), col[p], 0.85);
     var mid = [7.5 * u, 7.5 * u], corners = [[6, 6], [9, 6], [9, 9], [6, 9]];
@@ -295,6 +309,17 @@
   // ---------- agent cards ----------
   function compact(n) { return n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'k' : n.toLocaleString(); }
 
+  // One row per preference: a slider to set it, Lock to keep it fixed, and x to forget it.
+  function prefRows(i) {
+    return A.FACTS.map(function (f, k) {
+      var d = ' data-a="' + i + '" data-k="' + k + '"';
+      return '<li class="pref" id="pref' + i + '_' + k + '"><span class="pl">' + f.label + '</span><span class="v">0.0</span>' +
+        '<input type="range" min="-6" max="6" step="0.5" value="0"' + d + ' aria-label="' + NAMES[i] + ': ' + f.label + '">' +
+        '<button class="lock"' + d + ' aria-pressed="false" title="Lock: games no longer change this preference">Lock</button>' +
+        '<button class="x"' + d + ' title="Forget this preference" aria-label="Forget: ' + f.label + '">×</button></li>';
+    }).join('');
+  }
+
   function buildAgents() {
     $('agents').innerHTML = NAMES.map(function (name, i) {
       return '<article class="panel agent" style="--c: var(--p' + i + ')">' +
@@ -303,7 +328,7 @@
         '<button id="seatA' + i + '" aria-pressed="true">Agent</button><button id="seatH' + i + '" aria-pressed="false">You</button></div></header>' +
         '<div class="stats"><div><b id="games' + i + '">0</b><span>games</span></div><div><b id="wins' + i + '">0</b><span>wins</span></div>' +
         '<div><b id="rate' + i + '">\u2013</b><span>last 100</span></div></div>' +
-        '<div><div class="label">Learned preferences</div></div><ul class="prefs" id="prefs' + i + '"></ul>' +
+        '<div><div class="label">Preferences you can edit</div></div><ul class="prefs" id="prefs' + i + '">' + prefRows(i) + '</ul>' +
         '<div class="row"><button class="danger" id="wipe' + i + '">Wipe memory</button><button id="wipecancel' + i + '" hidden>Cancel</button></div>' +
         '</article>';
     }).join('');
@@ -340,14 +365,13 @@
       $('games' + i).textContent = compact(m.games);
       $('wins' + i).textContent = compact(m.wins);
       $('rate' + i).textContent = rate == null ? '\u2013' : Math.round(rate * 100) + '%';
-      if (!m.games) { $('prefs' + i).innerHTML = '<li class="empty">Empty. Knows only the rules.</li>'; return; }
-      $('prefs' + i).innerHTML = A.FACTS.map(function (f, k) {
-        var w = m.weights[k], width = Math.min(50, Math.abs(w) / 6 * 50);
-        var pos = w >= 0 ? 'left:50%' : 'right:50%';
-        return '<li title="Chosen ' + m.seen[k].toLocaleString() + ' times"><span>' + f.label + '</span><span class="v">' +
-          (w > 0 ? '+' : '') + w.toFixed(1) + '</span><span class="bar"><i class="' + (w < 0 ? 'neg' : '') +
-          '" style="' + pos + ';width:' + width + '%"></i></span></li>';
-      }).join('');
+      A.FACTS.forEach(function (f, k) {                        // update rows in place so a drag is not interrupted
+        var row = $('pref' + i + '_' + k), w = m.weights[k], range = row.querySelector('input');
+        row.querySelector('.v').textContent = (w > 0 ? '+' : '') + w.toFixed(1);
+        if (document.activeElement !== range) range.value = w;
+        row.querySelector('.lock').setAttribute('aria-pressed', m.locks[k]);
+        row.title = 'Chosen ' + m.seen[k].toLocaleString() + ' times';
+      });
     });
   }
 
@@ -388,9 +412,90 @@
     $('chart').innerHTML = out;
   }
 
+  // ---------- editing preferences ----------
+  $('agents').addEventListener('input', function (ev) {
+    var el = ev.target;
+    if (el.type !== 'range') return;
+    var a = +el.dataset.a, k = +el.dataset.k;
+    agents[a].setWeight(k, +el.value);
+    var w = agents[a].memory.weights[k];
+    $('pref' + a + '_' + k).querySelector('.v').textContent = (w > 0 ? '+' : '') + w.toFixed(1);
+  });
+  $('agents').addEventListener('change', function (ev) { if (ev.target.type === 'range') saveAll(); });
+  $('agents').addEventListener('click', function (ev) {
+    var b = ev.target.closest('button.lock, button.x');
+    if (!b) return;
+    var a = +b.dataset.a, k = +b.dataset.k;
+    if (b.classList.contains('lock')) agents[a].setLock(k, !agents[a].memory.locks[k]);
+    else agents[a].forget(k);
+    saveAll(); renderAgents();
+  });
+
+  // ---------- rules you can change while playing ----------
+  function exitValue() { var e = L.rules.exitRolls.join(','); return e === '1,2,3,4,5,6' ? 'any' : e; }
+  function syncRuleControls() {
+    $('ruleExact').checked = L.rules.exactHome;
+    $('ruleExtra').checked = L.rules.extraTurns;
+    $('ruleThree').checked = L.rules.threeSixes;
+    $('ruleSafe').checked = L.rules.safeSquares;
+    var sel = $('ruleExit'), v = exitValue();
+    if (!Array.prototype.some.call(sel.options, function (o) { return o.value === v; })) {
+      var o = document.createElement('option');                // a roll set typed as an order
+      o.value = v; o.textContent = 'A roll of ' + v.split(',').join(', ');
+      sel.appendChild(o);
+    }
+    sel.value = v;
+  }
+  // Applies L.rules to the game in progress (from the next roll) and remembers it.
+  function pushRules() {
+    var r = L.copyRules(L.rules);
+    Object.keys(r).forEach(function (k) { game.rules[k] = r[k]; });
+    save(RULE_KEY, L.rules); syncRuleControls(); draw();
+  }
+  function readRuleControls() {
+    L.rules.exactHome = $('ruleExact').checked;
+    L.rules.extraTurns = $('ruleExtra').checked;
+    L.rules.threeSixes = $('ruleThree').checked;
+    L.rules.safeSquares = $('ruleSafe').checked;
+    var v = $('ruleExit').value;
+    L.rules.exitRolls = v === 'any' ? [1, 2, 3, 4, 5, 6] : v.split(',').map(Number);
+    pushRules();
+    say('Rules changed', 'The new rules apply from the next roll.');
+  }
+  ['ruleExact', 'ruleExtra', 'ruleThree', 'ruleSafe', 'ruleExit'].forEach(function (id) {
+    $(id).addEventListener('change', readRuleControls);
+  });
+
+  // ---------- typed orders ----------
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function runCommands() {
+    var text = $('cmd').value;
+    if (!text.trim()) return;
+    var results = window.LudoCommands.run(text, { agents: agents, rules: L.rules });
+    agents.forEach(function (a, i) {                           // an agent that forgot everything mid-game keeps playing
+      if (seats[i] === 'agent' && game.winner < 0 && !training && !a.trace) a.startGame();
+    });
+    saveAll(); renderAgents(); pushRules();
+    $('cmdlog').innerHTML = results.map(function (r) {
+      return '<li class="' + (r.ok ? 'ok' : 'err') + '"><code>' + esc(r.line) + '</code> ' + esc(r.text) + '</li>';
+    }).join('');
+    if (results.length && results.every(function (r) { return r.ok; })) $('cmd').value = '';
+  }
+  $('cmdrun').addEventListener('click', runCommands);
+  $('cmd').addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); runCommands(); }
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-ex]'), function (chip) {
+    chip.addEventListener('click', function () {
+      var box = $('cmd');
+      box.value = (box.value.trim() ? box.value.replace(/\s*$/, '\n') : '') + chip.dataset.ex;
+      box.focus();
+    });
+  });
+
   // ---------- backup ----------
   $('export').addEventListener('click', function () {
-    var text = JSON.stringify({ ludoLearners: 1, agents: agents.map(function (a) { return a.memory; }), history: hist });
+    var text = JSON.stringify({ ludoLearners: 1, agents: agents.map(function (a) { return a.memory; }), rules: L.rules, history: hist });
     $('backup').value = text; $('backup').select();
     var note = function (s) { $('backupNote').textContent = s; };
     try { navigator.clipboard.writeText(text).then(function () { note('Copied. Keep this text somewhere safe.'); },
@@ -406,13 +511,14 @@
     }
     data.agents.forEach(function (m, i) { agents[i] = new A.Agent(m); });
     if (data.history && Array.isArray(data.history.pts) && Array.isArray(data.history.cur)) hist = data.history;
+    applyRuleSettings(data.rules); pushRules();
     saveAll(); renderAgents(); renderChart();
     $('backupNote').textContent = 'Memories restored.';
     if (!training) runGame();
   });
 
   // ---------- start ----------
-  buildAgents(); renderAgents(); renderChart();
+  buildAgents(); renderAgents(); renderChart(); syncRuleControls();
   if (window.ResizeObserver) new ResizeObserver(draw).observe(canvas);
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw);
   new MutationObserver(draw).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });

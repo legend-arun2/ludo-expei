@@ -1,3 +1,5 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Ludo Learners</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap">
@@ -78,14 +80,26 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .stats b { display: block; font: 700 18px var(--display); font-variant-numeric: tabular-nums; }
 .stats span { font-size: 11px; color: var(--muted); }
-.prefs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
-.prefs li { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 2px 8px; align-items: center; font-size: 12px; }
-.prefs .v { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
-.prefs .bar { grid-column: 1 / -1; height: 5px; background: var(--line); border-radius: 3px; position: relative; }
-.prefs .bar::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--muted); }
-.prefs .bar i { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: var(--accent); }
-.prefs .bar i.neg { background: var(--danger); }
-.empty { color: var(--muted); font-size: 12px; }
+.prefs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+.pref { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 3px 6px; align-items: center; font-size: 12px; }
+.pref .pl { grid-column: 1 / 3; }
+.pref .v { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.pref input[type="range"] { min-width: 0; width: 100%; margin: 0; }
+.pref button { padding: 1px 6px; font-size: 11px; line-height: 1.5; }
+button.lock[aria-pressed="true"] { background: var(--fg); color: var(--surface); border-color: var(--fg); }
+
+.hint { color: var(--muted); font-size: 13px; }
+code { font: 12px ui-monospace, Menlo, Consolas, monospace; background: var(--bg); padding: 1px 4px; border-radius: 3px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { font: 500 12px ui-monospace, Menlo, Consolas, monospace; padding: 3px 8px; color: var(--muted); }
+#cmdlog { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+#cmdlog:empty { display: none; }
+#cmdlog .ok { color: var(--muted); }
+#cmdlog .err { color: var(--danger); }
+details summary { cursor: pointer; font-weight: 600; }
+.help { margin: 8px 0 0; padding-left: 18px; color: var(--muted); display: flex; flex-direction: column; gap: 5px; }
+select { font: 13px var(--body); color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 5px; padding: 5px 8px; }
+.opts { display: flex; flex-direction: column; gap: 10px; }
 
 .notes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 .notes ul { margin: 0; padding-left: 18px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
@@ -161,6 +175,54 @@ textarea { width: 100%; min-height: 70px; font: 12px ui-monospace, Menlo, Consol
     <button id="wipeallcancel" hidden>Cancel</button>
   </section>
 
+  <section class="notes" id="orders">
+    <div class="panel">
+      <h2>Give orders</h2>
+      <p class="hint">One order per line, or separate them with a semicolon. Run them with the button or Ctrl+Enter.</p>
+      <textarea id="cmd" spellcheck="false" aria-label="Orders for the agents" placeholder="red: always capture"></textarea>
+      <div class="row">
+        <button id="cmdrun" class="primary">Run orders</button>
+      </div>
+      <div class="chips" aria-label="Example orders">
+        <button data-ex="red: always capture">red: always capture</button>
+        <button data-ex="green: be cautious locked">green: be cautious locked</button>
+        <button data-ex="blue: forget all">blue: forget all</button>
+        <button data-ex="all: unlock capture">all: unlock capture</button>
+        <button data-ex="rule exact home off">rule exact home off</button>
+      </div>
+      <ul id="cmdlog" aria-live="polite"></ul>
+      <details>
+        <summary>What the agents understand</summary>
+        <ul class="help">
+          <li>Who: <code>red</code> <code>green</code> <code>yellow</code> <code>blue</code> <code>all</code> or <code>red and blue</code>, then a colon.</li>
+          <li><code>always</code> and <code>never</code> set a preference to +6 or -6 and lock it. <code>prefer</code> and <code>avoid</code> set +3 or -3 and leave it free to learn. End an order with <code>locked</code> or <code>unlocked</code> to choose.</li>
+          <li><code>set capture to 2.5</code>, <code>lock capture</code>, <code>unlock capture</code>, <code>forget capture</code>, <code>forget all</code>.</li>
+          <li>Styles: <code>be aggressive</code>, <code>be cautious</code>, <code>be racer</code>.</li>
+          <li>Preferences: leave the yard, capture, safe square, home column, home, flee danger, risk, pair, lead. Join several with "and".</li>
+          <li>Rules: <code>rule exact home off</code>, <code>rule extra turns off</code>, <code>rule three sixes off</code>, <code>rule safe squares off</code>, <code>rule exit 1,6</code>.</li>
+        </ul>
+      </details>
+    </div>
+    <div class="panel">
+      <h2>Rules, changeable while playing</h2>
+      <p class="hint">A change applies from the next roll and is remembered. The agents keep what they learned under the old rules.</p>
+      <div class="opts">
+        <label class="inline"><input type="checkbox" id="ruleExact"> Exact roll needed to get home</label>
+        <label class="inline"><input type="checkbox" id="ruleExtra"> Roll again after a 6, a capture or getting home</label>
+        <label class="inline"><input type="checkbox" id="ruleThree"> A third 6 in a row loses the turn</label>
+        <label class="inline"><input type="checkbox" id="ruleSafe"> Start and star squares are safe</label>
+        <label class="inline" for="ruleExit">A token leaves the yard on
+          <select id="ruleExit">
+            <option value="6">only a 6</option>
+            <option value="1,6">a 1 or a 6</option>
+            <option value="5,6">a 5 or a 6</option>
+            <option value="any">any roll</option>
+          </select>
+        </label>
+      </div>
+    </div>
+  </section>
+
   <section class="notes">
     <div class="panel">
       <h2>What the agents start with</h2>
@@ -169,6 +231,7 @@ textarea { width: 100%; min-height: 70px; font: 12px ui-monospace, Menlo, Consol
         <li>For each move it can see plain facts, such as whether it captures or lands on a safe square. It is never told which facts are good.</li>
         <li>Every preference starts at 0, so a new agent plays at random.</li>
         <li>After each game it is told one thing, won or lost, and shifts its preferences toward what it did in wins and away from what it did in losses.</li>
+        <li>You can edit any preference with its slider, lock it so games stop changing it, or forget it.</li>
         <li>Moves you make in a seat do not change that agent's memory.</li>
       </ul>
     </div>
@@ -196,4 +259,5 @@ textarea { width: 100%; min-height: 70px; font: 12px ui-monospace, Menlo, Consol
 
 <script src="engine.js"></script>
 <script src="agent.js"></script>
+<script src="commands.js"></script>
 <script src="ui.js"></script>

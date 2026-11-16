@@ -22,8 +22,8 @@
   var N = FACTS.length, STEP = 0.1, LIMIT = 6, RECENT = 100;
 
   function blankMemory() {
-    var m = { weights: [], seen: [], games: 0, wins: 0, recent: [] };
-    for (var i = 0; i < N; i++) { m.weights.push(0); m.seen.push(0); }
+    var m = { weights: [], seen: [], locks: [], games: 0, wins: 0, recent: [] };
+    for (var i = 0; i < N; i++) { m.weights.push(0); m.seen.push(0); m.locks.push(false); }
     return m;
   }
 
@@ -40,7 +40,7 @@
     var onTrack = move.to <= L.LAST_TRACK;
     x[0] = move.from === -1 ? 1 : 0;
     x[1] = caps.length ? 1 : 0;
-    x[2] = onTrack && L.isSafe(L.absSquare(player, move.to)) ? 1 : 0;
+    x[2] = onTrack && L.isSafe(L.absSquare(player, move.to), state.rules) ? 1 : 0;
     x[3] = move.from <= L.LAST_TRACK && move.to > L.LAST_TRACK && move.to < L.HOME ? 1 : 0;
     x[4] = move.to === L.HOME ? 1 : 0;
     x[5] = L.inDanger(state, player, move.from) ? 1 : 0;
@@ -62,8 +62,26 @@
 
   function Agent(memory) {
     this.memory = validMemory(memory) ? memory : blankMemory();
+    var m = this.memory;
+    if (!Array.isArray(m.locks) || m.locks.length !== N) {      // older saves have no locks
+      m.locks = [];
+      for (var i = 0; i < N; i++) m.locks.push(false);
+    }
     this.trace = null;
   }
+
+  function clamp(v) { return Math.max(-LIMIT, Math.min(LIMIT, v)); }
+
+  // Orders from the player. A locked preference stays where it is set; the agent
+  // can still use it but game results no longer move it.
+  Agent.prototype.setWeight = function (k, v, lock) {
+    this.memory.weights[k] = clamp(v);
+    if (lock !== undefined) this.memory.locks[k] = !!lock;
+  };
+  Agent.prototype.setLock = function (k, on) { this.memory.locks[k] = !!on; };
+  Agent.prototype.forget = function (k) {
+    this.memory.weights[k] = 0; this.memory.seen[k] = 0; this.memory.locks[k] = false;
+  };
 
   Agent.prototype.startGame = function () {
     this.trace = { grad: new Array(N).fill(0), seen: new Array(N).fill(0) };
@@ -103,8 +121,7 @@
     if (this.trace) {
       var usual = m.games ? m.wins / m.games : 0;
       for (var k = 0; k < N; k++) {
-        var w = m.weights[k] + STEP * (result - usual) * this.trace.grad[k];
-        m.weights[k] = Math.max(-LIMIT, Math.min(LIMIT, w));
+        if (!m.locks[k]) m.weights[k] = clamp(m.weights[k] + STEP * (result - usual) * this.trace.grad[k]);
         m.seen[k] += this.trace.seen[k];
       }
     }
@@ -142,7 +159,7 @@
     return state.winner;
   }
 
-  root.LudoAgent = { FACTS: FACTS, Agent: Agent, blankMemory: blankMemory, validMemory: validMemory,
+  root.LudoAgent = { FACTS: FACTS, LIMIT: LIMIT, Agent: Agent, blankMemory: blankMemory, validMemory: validMemory,
     observe: observe, playGame: playGame };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.LudoAgent;
 })(typeof window !== 'undefined' ? window : globalThis);

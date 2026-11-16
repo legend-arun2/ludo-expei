@@ -12,14 +12,26 @@
   var START = [0, 13, 26, 39];
   var SAFE = { 0: 1, 13: 1, 26: 1, 39: 1, 8: 1, 21: 1, 34: 1, 47: 1 };
 
+  // Rules that can be changed between rolls. New games copy the current settings;
+  // changing a running game's `state.rules` takes effect from the next roll.
+  function defaultRules() {
+    return { exactHome: true, extraTurns: true, threeSixes: true, safeSquares: true, exitRolls: [6] };
+  }
+  function copyRules(r) {
+    var c = {};
+    for (var k in r) c[k] = Array.isArray(r[k]) ? r[k].slice() : r[k];
+    return c;
+  }
+  var rules = defaultRules();
+
   function newGame() {
     var tokens = [];
     for (var i = 0; i < PLAYERS; i++) tokens.push([-1, -1, -1, -1]);
-    return { tokens: tokens, turn: 0, sixes: 0, winner: -1 };
+    return { tokens: tokens, turn: 0, sixes: 0, winner: -1, rules: copyRules(rules) };
   }
 
   function absSquare(player, p) { return (START[player] + p) % TRACK; }
-  function isSafe(abs) { return SAFE[abs] === 1; }
+  function isSafe(abs, r) { return SAFE[abs] === 1 && !(r && r.safeSquares === false); }
   function rollDie(rng) { return 1 + Math.floor((rng || Math.random)() * 6); }
 
   // How many tokens of `player` stand on shared-track square `abs`.
@@ -37,7 +49,7 @@
     var out = [];
     if (to < 0 || to > LAST_TRACK) return out;
     var abs = absSquare(player, to);
-    if (isSafe(abs)) return out;
+    if (isSafe(abs, state.rules)) return out;
     for (var o = 0; o < PLAYERS; o++) {
       if (o === player || countAt(state, o, abs) !== 1) continue;
       for (var i = 0; i < TOKENS; i++) {
@@ -49,17 +61,19 @@
   }
 
   function legalMoves(state, player, roll) {
-    var moves = [], t = state.tokens[player];
+    var moves = [], t = state.tokens[player], r = state.rules;
     for (var i = 0; i < TOKENS; i++) {
       var p = t[i];
-      if (p === -1) { if (roll === 6) moves.push({ token: i, from: -1, to: 0 }); }
-      else if (p < HOME && p + roll <= HOME) moves.push({ token: i, from: p, to: p + roll });
+      if (p === -1) { if (r.exitRolls.indexOf(roll) >= 0) moves.push({ token: i, from: -1, to: 0 }); }
+      else if (p < HOME && (p + roll <= HOME || !r.exactHome)) {
+        moves.push({ token: i, from: p, to: Math.min(p + roll, HOME) });
+      }
     }
     return moves;
   }
 
   // Third six in a row: the turn is lost before any move is made.
-  function isForfeit(state, roll) { return roll === 6 && state.sixes === 2; }
+  function isForfeit(state, roll) { return state.rules.threeSixes && roll === 6 && state.sixes === 2; }
 
   function nextPlayer(state) { state.turn = (state.turn + 1) % PLAYERS; state.sixes = 0; }
 
@@ -80,7 +94,7 @@
         state.winner = player; res.won = true; return res;
       }
     }
-    res.extra = roll === 6 || res.captured.length > 0 || res.home;
+    res.extra = state.rules.extraTurns && (roll === 6 || res.captured.length > 0 || res.home);
     if (res.extra) state.sixes = roll === 6 ? state.sixes + 1 : 0;
     else nextPlayer(state);
     return res;
@@ -90,7 +104,7 @@
   function inDanger(state, player, p) {
     if (p < 0 || p > LAST_TRACK) return false;
     var abs = absSquare(player, p);
-    if (isSafe(abs) || countAt(state, player, abs) > 1) return false;
+    if (isSafe(abs, state.rules) || countAt(state, player, abs) > 1) return false;
     for (var o = 0; o < PLAYERS; o++) {
       if (o === player) continue;
       for (var i = 0; i < TOKENS; i++) {
@@ -105,6 +119,7 @@
 
   root.Ludo = {
     PLAYERS: PLAYERS, TOKENS: TOKENS, TRACK: TRACK, LAST_TRACK: LAST_TRACK, HOME: HOME, START: START,
+    rules: rules, defaultRules: defaultRules, copyRules: copyRules,
     newGame: newGame, absSquare: absSquare, isSafe: isSafe, rollDie: rollDie, countAt: countAt,
     capturesAt: capturesAt, legalMoves: legalMoves, isForfeit: isForfeit, play: play, inDanger: inDanger
   };
