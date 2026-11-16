@@ -282,7 +282,7 @@
   function train(total) {
     if (training) return;
     training = true; runId++;                                  // abandons the game on the board
-    var done = 0, stop = false, bar = $('progress');
+    var done = 0, stop = false, bar = $('progress'), lastShown = Date.now();
     bar.hidden = false; $('trainstop').hidden = false; $('roll').hidden = true;
     setTrainButtons(true);
     $('trainstop').onclick = function () { stop = true; };
@@ -292,6 +292,9 @@
       while (done < total && !stop && Date.now() < until) { recordGame(A.playGame(agents)); done++; }
       bar.firstElementChild.style.width = (100 * done / total) + '%';
       $('trainNote').textContent = done.toLocaleString() + ' of ' + total.toLocaleString() + ' games played';
+      if (done < total && !stop && Date.now() - lastShown > 2000) {   // long runs: show progress and save as they go
+        lastShown = Date.now(); saveAll(); renderAgents(); renderChart();
+      }
       if (done < total && !stop) return setTimeout(chunk, 0);
       training = false; saveAll(); renderAgents(); renderChart();
       bar.hidden = true; $('trainstop').hidden = true; setTrainButtons(false);
@@ -300,11 +303,12 @@
     })();
   }
   function setTrainButtons(off) {
-    ['train100', 'train1000', 'train10000', 'newgame'].forEach(function (b) { $(b).disabled = off; });
+    ['train100', 'train1000', 'train10000', 'train1000000', 'newgame'].forEach(function (b) { $(b).disabled = off; });
   }
   $('train100').addEventListener('click', function () { train(100); });
   $('train1000').addEventListener('click', function () { train(1000); });
   $('train10000').addEventListener('click', function () { train(10000); });
+  $('train1000000').addEventListener('click', function () { train(1000000); });
 
   // ---------- agent cards ----------
   function compact(n) { return n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'k' : n.toLocaleString(); }
